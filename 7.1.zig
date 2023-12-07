@@ -2,35 +2,29 @@
 
 const std = @import("std");
 
-const Class = enum { hicard, pair, twopair, threekind, fullhouse, fourkind, fivekind };
-const ranks = "23456789TJQKA".*;
-const ranks_p2 = "J23456789TQKA".*;
+const part_ranks = [_][13]u8{ "23456789TJQKA".*, "J23456789TQKA".* };
 
 const Hand = struct {
-    rank: Rank,
+    rank: struct { u8, u40 },
     bid: u32,
-    pub const Rank = struct { class: Class, hand: u40 };
     fn lessThan(_: void, lhs: Hand, rhs: Hand) bool {
-        const l = (@as(usize, @intFromEnum(lhs.rank.class)) << 40) | lhs.rank.hand;
-        const r = (@as(usize, @intFromEnum(rhs.rank.class)) << 40) | rhs.rank.hand;
+        const l = (@as(usize, lhs.rank[0]) << 40) | lhs.rank[1];
+        const r = (@as(usize, rhs.rank[0]) << 40) | rhs.rank[1];
         return l < r;
     }
 };
 
-fn int16(x: [2]u8) u16 {
-    return @bitCast(x);
-}
-
-fn handRank(line: []const u8, part: u8) Hand.Rank {
+fn parseHand(line: []const u8, part: u8) !Hand {
     var cards = line[0..5].*;
     // convert cards to ranks
-    const card_ranks = if (part == 1) ranks else ranks_p2;
+    const card_ranks = part_ranks[part - 1];
     for (0..5) |i|
         cards[i] = @intCast(std.mem.indexOfScalar(u8, &card_ranks, cards[i]).?);
+
     // build a counts array, list of [count,rank] entries and sort by count desc
     // for example: before sorting, the hand "33455" becomes
     //   [[0,'2'],[2,'3'],[1,'4'],[2,'5'],[0,'6']...]
-    var counts = [1][2]u8{.{ 0, undefined }} ** ranks.len;
+    var counts = [1][2]u8{.{ 0, undefined }} ** 13;
     for (0..counts.len) |i| counts[i][1] = card_ranks[i];
     for (0..5) |i| counts[cards[i]][0] += 1;
     std.mem.sort([2]u8, &counts, {}, struct {
@@ -57,15 +51,9 @@ fn handRank(line: []const u8, part: u8) Hand.Rank {
     }
 
     const hand = std.mem.readInt(u40, &cards, .big);
-    return switch (int16(.{ counts[0][0], counts[1][0] })) {
-        int16(.{ 5, 0 }) => .{ .class = .fivekind, .hand = hand },
-        int16(.{ 4, 1 }) => .{ .class = .fourkind, .hand = hand },
-        int16(.{ 3, 2 }) => .{ .class = .fullhouse, .hand = hand },
-        int16(.{ 3, 1 }) => .{ .class = .threekind, .hand = hand },
-        int16(.{ 2, 2 }) => .{ .class = .twopair, .hand = hand },
-        int16(.{ 2, 1 }) => .{ .class = .pair, .hand = hand },
-        int16(.{ 1, 1 }) => .{ .class = .hicard, .hand = hand },
-        else => unreachable,
+    return .{
+        .rank = .{ counts[0][0] * 2 + counts[1][0], hand },
+        .bid = try std.fmt.parseInt(u32, line[6..], 10),
     };
 }
 
@@ -83,12 +71,8 @@ pub fn main() !void {
     for ([_]u8{ 1, 2 }) |part| {
         hands.clearRetainingCapacity();
         var lines = std.mem.tokenizeScalar(u8, input, '\n');
-        while (lines.next()) |line| {
-            try hands.append(.{
-                .rank = handRank(line, part),
-                .bid = try std.fmt.parseInt(u32, line[6..], 10),
-            });
-        }
+        while (lines.next()) |line|
+            try hands.append(try parseHand(line, part));
 
         std.mem.sort(Hand, hands.items, {}, Hand.lessThan);
         var sum: usize = 0;
